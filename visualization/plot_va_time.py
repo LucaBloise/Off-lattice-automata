@@ -199,7 +199,12 @@ def latest_runs(outputs_dir: Path, count: int) -> List[Path]:
     if not outputs_dir.exists() or not outputs_dir.is_dir():
         raise FileNotFoundError(f"outputs-dir does not exist: {outputs_dir}")
 
-    run_dirs = [p for p in outputs_dir.iterdir() if p.is_dir()]
+    run_dirs = []
+    for trajectory in outputs_dir.rglob("trajectory.txt"):
+        run_dir = trajectory.parent
+        if (run_dir / "properties.txt").exists():
+            run_dirs.append(run_dir)
+
     run_dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return run_dirs[:count]
 
