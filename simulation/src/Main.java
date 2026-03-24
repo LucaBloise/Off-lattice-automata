@@ -4,6 +4,7 @@ import java.nio.file.Path;
 
 public class Main {
     private static final int DEFAULT_STEPS = 1000;
+    private static final SimulationScenario DEFAULT_SCENARIO = SimulationScenario.STANDARD;
 
     public static void main(String[] args) {
         try {
@@ -12,7 +13,7 @@ public class Main {
 
             SimulationOutputWriter outputWriter = new SimulationOutputWriter();
             Path executionPath = outputWriter.createExecutionFolder();
-            outputWriter.writeProperties(executionPath, config);
+            outputWriter.writeProperties(executionPath, config, simulation);
 
             try (BufferedWriter trajectoryWriter = outputWriter.openTrajectoryWriter(executionPath)) {
                 outputWriter.writeSnapshot(trajectoryWriter, 0, simulation.getParticles());
@@ -33,19 +34,55 @@ public class Main {
     }
 
     private static SimulationConfig parseArguments(String[] args) {
-        if (args.length < 1 || args.length > 3) {
-            throw new IllegalArgumentException("Expected arguments: <eta> [steps] [seed]");
+        if (args.length < 1 || args.length > 4) {
+            throw new IllegalArgumentException("Expected arguments: <eta> [scenario] [steps] [seed]");
         }
 
         double eta = Double.parseDouble(args[0]);
-        int steps = args.length >= 2 ? Integer.parseInt(args[1]) : DEFAULT_STEPS;
-        long seed = args.length == 3 ? Long.parseLong(args[2]) : System.nanoTime();
+        SimulationScenario scenario = DEFAULT_SCENARIO;
+        int steps = DEFAULT_STEPS;
+        long seed = System.nanoTime();
 
-        return new SimulationConfig(eta, steps, seed);
+        int index = 1;
+        if (index < args.length) {
+            SimulationScenario parsedScenario = tryParseScenario(args[index]);
+            if (parsedScenario != null) {
+                scenario = parsedScenario;
+                index++;
+            }
+        }
+
+        if (index < args.length) {
+            steps = Integer.parseInt(args[index]);
+            index++;
+        }
+
+        if (index < args.length) {
+            seed = Long.parseLong(args[index]);
+            index++;
+        }
+
+        if (index != args.length) {
+            throw new IllegalArgumentException("Invalid argument order. Use: <eta> [scenario] [steps] [seed]");
+        }
+
+        return new SimulationConfig(eta, steps, seed, scenario);
+    }
+
+    private static SimulationScenario tryParseScenario(String raw) {
+        try {
+            return SimulationScenario.fromString(raw);
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
     private static void printUsage() {
-        System.err.println("Usage: java -cp bin Main <eta> [steps] [seed]");
-        System.err.println("Example: java -cp bin Main 0.7 5000 12345");
+        System.err.println("Usage: java -cp bin Main <eta> [scenario] [steps] [seed]");
+        System.err.println("Scenario options: standard | fixed_leader | circular_leader");
+        System.err.println("Examples:");
+        System.err.println("  java -cp bin Main 0.7");
+        System.err.println("  java -cp bin Main 0.7 fixed_leader");
+        System.err.println("  java -cp bin Main 0.7 circular_leader 5000 12345");
     }
 }

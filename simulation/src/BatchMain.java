@@ -3,9 +3,10 @@ import java.nio.file.Path;
 
 public class BatchMain {
     private static final double[] DEFAULT_ETAS = {0.0, 1.0, 2.0, 3.0, 4.0, 5.0};
-    private static final int DEFAULT_REPETITIONS = 20;
+    private static final int DEFAULT_REPETITIONS = 10;
     private static final int DEFAULT_STEPS = 1000;
     private static final long DEFAULT_SEED_BASE = 1000L;
+    private static final SimulationScenario DEFAULT_SCENARIO = SimulationScenario.STANDARD;
 
     public static void main(String[] args) {
         try {
@@ -19,14 +20,50 @@ public class BatchMain {
     }
 
     private static BatchParams parseArguments(String[] args) {
-        if (args.length > 4) {
-            throw new IllegalArgumentException("Expected up to 4 arguments");
+        if (args.length > 5) {
+            throw new IllegalArgumentException("Expected up to 5 arguments");
         }
 
-        double[] etas = args.length >= 1 ? parseEtaList(args[0]) : DEFAULT_ETAS;
-        int repetitions = args.length >= 2 ? Integer.parseInt(args[1]) : DEFAULT_REPETITIONS;
-        int steps = args.length >= 3 ? Integer.parseInt(args[2]) : DEFAULT_STEPS;
-        long seedBase = args.length == 4 ? Long.parseLong(args[3]) : DEFAULT_SEED_BASE;
+        SimulationScenario scenario = DEFAULT_SCENARIO;
+        double[] etas = DEFAULT_ETAS;
+        int repetitions = DEFAULT_REPETITIONS;
+        int steps = DEFAULT_STEPS;
+        long seedBase = DEFAULT_SEED_BASE;
+
+        int index = 0;
+        if (index < args.length) {
+            SimulationScenario parsedScenario = tryParseScenario(args[index]);
+            if (parsedScenario != null) {
+                scenario = parsedScenario;
+                index++;
+            }
+        }
+
+        if (index < args.length) {
+            if (args[index].contains(",")) {
+                etas = parseEtaList(args[index]);
+                index++;
+            }
+        }
+
+        if (index < args.length) {
+            repetitions = Integer.parseInt(args[index]);
+            index++;
+        }
+
+        if (index < args.length) {
+            steps = Integer.parseInt(args[index]);
+            index++;
+        }
+
+        if (index < args.length) {
+            seedBase = Long.parseLong(args[index]);
+            index++;
+        }
+
+        if (index != args.length) {
+            throw new IllegalArgumentException("Invalid argument order. Use: [scenario] [etas_csv] [repetitions] [steps] [seed_base]");
+        }
 
         if (repetitions <= 0) {
             throw new IllegalArgumentException("repetitions must be >= 1");
@@ -35,7 +72,15 @@ public class BatchMain {
             throw new IllegalArgumentException("steps must be >= 0");
         }
 
-        return new BatchParams(etas, repetitions, steps, seedBase);
+        return new BatchParams(etas, repetitions, steps, seedBase, scenario);
+    }
+
+    private static SimulationScenario tryParseScenario(String raw) {
+        try {
+            return SimulationScenario.fromString(raw);
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
     private static double[] parseEtaList(String csv) {
@@ -71,13 +116,13 @@ public class BatchMain {
                 long seed = params.seedBase + (long) etaIndex * params.repetitions + rep;
 
                 try {
-                    Path outputPath = runSingleSimulation(outputWriter, eta, params.steps, seed);
+                    Path outputPath = runSingleSimulation(outputWriter, eta, params.steps, seed, params.scenario);
                     completed++;
-                    System.out.println("[" + completed + "/" + totalJobs + "] eta=" + eta + ", rep=" + rep + ", seed=" + seed + " -> " + outputPath.toAbsolutePath());
+                    System.out.println("[" + completed + "/" + totalJobs + "] eta=" + eta + ", rep=" + rep + ", seed=" + seed + ", scenario=" + params.scenario.getKey() + " -> " + outputPath.toAbsolutePath());
                 } catch (Exception e) {
                     completed++;
                     failures++;
-                    System.err.println("[" + completed + "/" + totalJobs + "] eta=" + eta + ", rep=" + rep + ", seed=" + seed + " FAILED: " + e.getMessage());
+                    System.err.println("[" + completed + "/" + totalJobs + "] eta=" + eta + ", rep=" + rep + ", seed=" + seed + ", scenario=" + params.scenario.getKey() + " FAILED: " + e.getMessage());
                 }
             }
         }
@@ -88,12 +133,12 @@ public class BatchMain {
         }
     }
 
-    private static Path runSingleSimulation(SimulationOutputWriter outputWriter, double eta, int steps, long seed) throws Exception {
-        SimulationConfig config = new SimulationConfig(eta, steps, seed);
+    private static Path runSingleSimulation(SimulationOutputWriter outputWriter, double eta, int steps, long seed, SimulationScenario scenario) throws Exception {
+        SimulationConfig config = new SimulationConfig(eta, steps, seed, scenario);
         VicsekSimulation simulation = new VicsekSimulation(config);
 
         Path executionPath = outputWriter.createExecutionFolder();
-        outputWriter.writeProperties(executionPath, config);
+        outputWriter.writeProperties(executionPath, config, simulation);
 
         try (BufferedWriter trajectoryWriter = outputWriter.openTrajectoryWriter(executionPath)) {
             outputWriter.writeSnapshot(trajectoryWriter, 0, simulation.getParticles());
@@ -108,9 +153,13 @@ public class BatchMain {
     }
 
     private static void printUsage() {
-        System.err.println("Usage: java -cp <classpath> BatchMain [etas_csv] [repetitions] [steps] [seed_base]");
+        System.err.println("Usage: java -cp <classpath> BatchMain [scenario] [etas_csv] [repetitions] [steps] [seed_base]");
+        System.err.println("Scenario options: standard | fixed_leader | circular_leader");
         System.err.println("Default etas_csv: 0,0.1,1,2,3,4,5");
-        System.err.println("Example: java -cp bin BatchMain 0,0.1,1,2,3,4,5 10 1000 1000");
+        System.err.println("Examples:");
+        System.err.println("  java -cp bin BatchMain");
+        System.err.println("  java -cp bin BatchMain fixed_leader");
+        System.err.println("  java -cp bin BatchMain circular_leader 0,0.1,1,2,3,4,5 10 1000 1000");
     }
 
     private static final class BatchParams {
@@ -118,12 +167,14 @@ public class BatchMain {
         private final int repetitions;
         private final int steps;
         private final long seedBase;
+        private final SimulationScenario scenario;
 
-        private BatchParams(double[] etas, int repetitions, int steps, long seedBase) {
+        private BatchParams(double[] etas, int repetitions, int steps, long seedBase, SimulationScenario scenario) {
             this.etas = etas;
             this.repetitions = repetitions;
             this.steps = steps;
             this.seedBase = seedBase;
+            this.scenario = scenario;
         }
     }
 }

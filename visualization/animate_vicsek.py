@@ -195,6 +195,23 @@ def as_float(properties: Dict[str, str], key: str, fallback: float) -> float:
         return fallback
 
 
+def as_int(properties: Dict[str, str], key: str, fallback: int) -> int:
+    raw = properties.get(key)
+    if raw is None:
+        return fallback
+    try:
+        return int(float(raw))
+    except ValueError:
+        return fallback
+
+
+def as_bool(properties: Dict[str, str], key: str, fallback: bool) -> bool:
+    raw = properties.get(key)
+    if raw is None:
+        return fallback
+    return raw.strip().lower() in {"1", "true", "yes", "y"}
+
+
 def main() -> None:
     args = parse_args()
 
@@ -222,6 +239,14 @@ def main() -> None:
     v0 = properties.get("v0", "unknown")
     dt = properties.get("dt", "unknown")
     radius = properties.get("interaction_radius", "unknown")
+    scenario = properties.get("scenario", properties.get("model", "unknown"))
+    has_leader = as_bool(properties, "has_leader", False)
+    leader_id = as_int(properties, "leader_id", -1)
+    valid_leader = has_leader and 0 <= leader_id < n_particles
+
+    follower_indices = np.arange(n_particles)
+    if valid_leader:
+        follower_indices = np.array([idx for idx in range(n_particles) if idx != leader_id], dtype=np.int64)
 
     fig, ax = plt.subplots(figsize=tuple(args.figsize))
     ax.set_xlim(0.0, L)
@@ -233,11 +258,11 @@ def main() -> None:
 
     initial_step = int(frame_indices[0])
     quiver = ax.quiver(
-        x[initial_step],
-        y[initial_step],
-        vx[initial_step] * args.vector_length_scale,
-        vy[initial_step] * args.vector_length_scale,
-        theta[initial_step],
+        x[initial_step, follower_indices],
+        y[initial_step, follower_indices],
+        vx[initial_step, follower_indices] * args.vector_length_scale,
+        vy[initial_step, follower_indices] * args.vector_length_scale,
+        theta[initial_step, follower_indices],
         cmap="hsv",
         clim=(0.0, 2.0 * math.pi),
         angles="xy",
@@ -249,14 +274,47 @@ def main() -> None:
         headaxislength=5.5,
     )
 
+    leader_quiver = None
+    leader_marker = None
+    if valid_leader:
+        leader_quiver = ax.quiver(
+            [x[initial_step, leader_id]],
+            [y[initial_step, leader_id]],
+            [vx[initial_step, leader_id] * args.vector_length_scale],
+            [vy[initial_step, leader_id] * args.vector_length_scale],
+            color="#111111",
+            angles="xy",
+            scale_units="xy",
+            scale=1.0,
+            width=max(args.vector_width * 1.7, 0.004),
+            headwidth=5.5,
+            headlength=7.0,
+            headaxislength=6.0,
+            zorder=5,
+        )
+        leader_marker = ax.scatter(
+            [x[initial_step, leader_id]],
+            [y[initial_step, leader_id]],
+            s=30,
+            c="#ffffff",
+            edgecolors="#111111",
+            linewidths=1.2,
+            zorder=6,
+            label="leader",
+        )
+        ax.legend(loc="lower right", fontsize=8)
+
     colorbar = fig.colorbar(quiver, ax=ax, pad=0.02)
     colorbar.set_label("velocity angle (rad)")
 
     info_lines = [
         f"run: {run_dir.name}",
+        f"scenario={scenario}",
         f"N={n_particles}  L={L:g}  density={density}",
         f"eta={eta}  v0={v0}  dt={dt}  r={radius}",
     ]
+    if valid_leader:
+        info_lines.append(f"leader_id={leader_id}")
     info_text = ax.text(
         0.02,
         0.98,
@@ -281,15 +339,27 @@ def main() -> None:
 
     def update(frame_number: int):
         step = int(frame_indices[frame_number])
-        offsets = np.column_stack((x[step], y[step]))
+        offsets = np.column_stack((x[step, follower_indices], y[step, follower_indices]))
         quiver.set_offsets(offsets)
         quiver.set_UVC(
-            vx[step] * args.vector_length_scale,
-            vy[step] * args.vector_length_scale,
-            theta[step],
+            vx[step, follower_indices] * args.vector_length_scale,
+            vy[step, follower_indices] * args.vector_length_scale,
+            theta[step, follower_indices],
         )
+        artists = [quiver, step_text, info_text]
+
+        if valid_leader and leader_quiver is not None and leader_marker is not None:
+            leader_offsets = np.array([[x[step, leader_id], y[step, leader_id]]])
+            leader_quiver.set_offsets(leader_offsets)
+            leader_quiver.set_UVC(
+                np.array([vx[step, leader_id] * args.vector_length_scale]),
+                np.array([vy[step, leader_id] * args.vector_length_scale]),
+            )
+            leader_marker.set_offsets(leader_offsets)
+            artists.extend([leader_quiver, leader_marker])
+
         step_text.set_text(f"step={step} / {n_steps - 1}")
-        return quiver, step_text, info_text
+        return tuple(artists)
 
     animation = FuncAnimation(
         fig,

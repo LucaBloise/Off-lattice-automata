@@ -22,11 +22,15 @@ public class SimulationOutputWriter {
         return executionPath;
     }
 
-    public void writeProperties(Path executionPath, SimulationConfig config) throws IOException {
+    public void writeProperties(Path executionPath, SimulationConfig config, VicsekSimulation simulation) throws IOException {
         Path propertiesFile = executionPath.resolve("properties.txt");
 
         try (BufferedWriter writer = Files.newBufferedWriter(propertiesFile, StandardCharsets.UTF_8)) {
-            writer.write("model=Vicsek_standard_no_leader");
+            writer.write("model=Vicsek_" + config.getScenario().getKey());
+            writer.newLine();
+            writer.write("scenario=" + config.getScenario().getKey());
+            writer.newLine();
+            writer.write("scenario_description=" + config.getScenario().getDescription());
             writer.newLine();
             writer.write("particles=point_like");
             writer.newLine();
@@ -68,6 +72,31 @@ public class SimulationOutputWriter {
             writer.newLine();
             writer.write("seed=" + config.getSeed());
             writer.newLine();
+
+            writer.write("has_leader=" + config.getScenario().hasLeader());
+            writer.newLine();
+            writer.write("leader_id=" + simulation.getLeaderId());
+            writer.newLine();
+            if (config.getScenario() == SimulationScenario.FIXED_LEADER) {
+                writer.write("leader_behavior=fixed_direction");
+                writer.newLine();
+                writer.write("leader_fixed_theta=" + simulation.getLeaderFixedTheta());
+                writer.newLine();
+            } else if (config.getScenario() == SimulationScenario.CIRCULAR_LEADER) {
+                writer.write("leader_behavior=circular_trajectory");
+                writer.newLine();
+                writer.write("leader_circular_center_x=" + simulation.getLeaderCircularCenterX());
+                writer.newLine();
+                writer.write("leader_circular_center_y=" + simulation.getLeaderCircularCenterY());
+                writer.newLine();
+                writer.write("leader_circular_radius=" + simulation.getLeaderCircularRadius());
+                writer.newLine();
+                writer.write("leader_circular_omega=" + simulation.getLeaderCircularOmega());
+                writer.newLine();
+            } else {
+                writer.write("leader_behavior=none");
+                writer.newLine();
+            }
         }
     }
 

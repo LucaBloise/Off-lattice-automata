@@ -275,9 +275,10 @@ def main() -> None:
         eta = props.get("eta", "?")
         rho = props.get("density", "?")
         n_particles = props.get("N", "?")
+        scenario = props.get("scenario", props.get("model", "?"))
         run_name = run_dir.name
 
-        ax.set_title(f"{run_name} | eta={eta}, density={rho}, N={n_particles}")
+        ax.set_title(f"{run_name} | scenario={scenario}, eta={eta}, density={rho}, N={n_particles}")
         ax.set_xlabel("time step t")
         ax.set_ylabel("Va")
         ax.set_ylim(0.0, 1.02)

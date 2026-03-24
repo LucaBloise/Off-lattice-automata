@@ -55,6 +55,12 @@ def parse_args() -> argparse.Namespace:
         help="Discard all timesteps t < transient-step when averaging Va(t).",
     )
     parser.add_argument(
+        "--scenario",
+        type=str,
+        default="standard",
+        help="Scenario filter: standard, fixed_leader, circular_leader.",
+    )
+    parser.add_argument(
         "--min-runs-per-eta",
         type=int,
         default=1,
@@ -126,6 +132,37 @@ def as_int(props: Dict[str, str], key: str, default: int) -> int:
         return int(float(value))
     except ValueError:
         return default
+
+
+def normalize_scenario(raw: str) -> str:
+    value = raw.strip().lower()
+    aliases = {
+        "standard": "standard",
+        "normal": "standard",
+        "no_leader": "standard",
+        "none": "standard",
+        "fixed": "fixed_leader",
+        "fixed_leader": "fixed_leader",
+        "leader_fixed": "fixed_leader",
+        "circular": "circular_leader",
+        "circular_leader": "circular_leader",
+        "leader_circular": "circular_leader",
+    }
+    if value in aliases:
+        return aliases[value]
+    raise ValueError(f"Unknown scenario value: {raw}")
+
+
+def scenario_from_properties(props: Dict[str, str]) -> str:
+    if "scenario" in props:
+        return normalize_scenario(props["scenario"])
+
+    model = props.get("model", "").strip().lower()
+    if "fixed" in model:
+        return "fixed_leader"
+    if "circular" in model:
+        return "circular_leader"
+    return "standard"
 
 
 def parse_trajectory(path: Path) -> np.ndarray:
@@ -218,11 +255,12 @@ def eta_allowed(eta: float, eta_list: List[float] | None, tol: float) -> bool:
     return any(abs(eta - target) <= tol for target in eta_list)
 
 
-def run_scalar_va(run_dir: Path, transient_step: int) -> Tuple[float, float, int]:
+def run_scalar_va(run_dir: Path, transient_step: int) -> Tuple[float, float, int, str]:
     properties = parse_properties(run_dir / "properties.txt")
     eta = as_float(properties, "eta", math.nan)
     if math.isnan(eta):
         raise ValueError(f"Missing numeric eta in properties.txt for run: {run_dir}")
+    scenario = scenario_from_properties(properties)
 
     data = parse_trajectory(run_dir / "trajectory.txt")
     va_t = compute_va_t(data, properties)
@@ -234,7 +272,7 @@ def run_scalar_va(run_dir: Path, transient_step: int) -> Tuple[float, float, int
         )
 
     va_scalar = float(np.mean(va_t[t0:]))
-    return eta, va_scalar, len(va_t)
+    return eta, va_scalar, len(va_t), scenario
 
 
 def aggregate_by_eta(
@@ -243,14 +281,18 @@ def aggregate_by_eta(
     eta_list: List[float] | None,
     eta_tol: float,
     min_runs_per_eta: int,
+    scenario_filter: str,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Dict[float, List[Tuple[str, float]]]]:
     grouped: Dict[float, List[Tuple[str, float]]] = defaultdict(list)
 
     for run in runs:
         try:
-            eta, va_scalar, _ = run_scalar_va(run, transient_step)
+            eta, va_scalar, _, run_scenario = run_scalar_va(run, transient_step)
         except Exception as exc:
             print(f"[warn] Skipping {run.name}: {exc}")
+            continue
+
+        if run_scenario != scenario_filter:
             continue
 
         if not eta_allowed(eta, eta_list, eta_tol):
@@ -307,6 +349,8 @@ def main() -> None:
     if args.eta_tol < 0:
         raise ValueError("--eta-tol must be >= 0")
 
+    scenario_filter = normalize_scenario(args.scenario)
+
     runs = resolve_runs(args)
     eta, va_mean, va_std, n_runs, grouped = aggregate_by_eta(
         runs=runs,
@@ -314,6 +358,7 @@ def main() -> None:
         eta_list=args.eta_list,
         eta_tol=args.eta_tol,
         min_runs_per_eta=args.min_runs_per_eta,
+        scenario_filter=scenario_filter,
     )
 
     if len(eta) == 0:
@@ -339,7 +384,9 @@ def main() -> None:
 
     ax.set_xlabel("eta")
     ax.set_ylabel("Va (stationary mean)")
-    ax.set_title(f"Input vs Observable: Va(eta), transient cutoff t >= {args.transient_step}")
+    ax.set_title(
+        f"Input vs Observable: Va(eta), scenario={scenario_filter}, transient cutoff t >= {args.transient_step}"
+    )
     ax.set_ylim(0.0, 1.02)
     ax.grid(alpha=0.25)
     ax.legend(loc="best", fontsize=9)

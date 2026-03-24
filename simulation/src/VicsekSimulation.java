@@ -6,15 +6,71 @@ public class VicsekSimulation {
     private final SimulationConfig config;
     private final List<Particle> particles;
     private final Random random;
+    private final int leaderId;
+
+    private Double leaderFixedTheta;
+    private Double leaderCircularPhase;
 
     public VicsekSimulation(SimulationConfig config) {
         this.config = config;
         this.random = new Random(config.getSeed());
         this.particles = initializeParticles();
+        this.leaderId = config.getScenario().hasLeader() ? SimulationConfig.LEADER_ID : -1;
+
+        initializeLeaderIfNeeded();
     }
 
     public List<Particle> getParticles() {
         return particles;
+    }
+
+    public int getLeaderId() {
+        return leaderId;
+    }
+
+    public Double getLeaderFixedTheta() {
+        return leaderFixedTheta;
+    }
+
+    public Double getLeaderCircularCenterX() {
+        return config.getScenario() == SimulationScenario.CIRCULAR_LEADER ? SimulationConfig.CIRCULAR_LEADER_CENTER_X : null;
+    }
+
+    public Double getLeaderCircularCenterY() {
+        return config.getScenario() == SimulationScenario.CIRCULAR_LEADER ? SimulationConfig.CIRCULAR_LEADER_CENTER_Y : null;
+    }
+
+    public Double getLeaderCircularRadius() {
+        return config.getScenario() == SimulationScenario.CIRCULAR_LEADER ? SimulationConfig.CIRCULAR_LEADER_RADIUS : null;
+    }
+
+    public Double getLeaderCircularOmega() {
+        return config.getScenario() == SimulationScenario.CIRCULAR_LEADER ? SimulationConfig.CIRCULAR_LEADER_OMEGA : null;
+    }
+
+    private void initializeLeaderIfNeeded() {
+        if (!config.getScenario().hasLeader()) {
+            return;
+        }
+
+        Particle leader = particles.get(leaderId);
+        if (config.getScenario() == SimulationScenario.FIXED_LEADER) {
+            leaderFixedTheta = random.nextDouble() * 2.0 * Math.PI;
+            leader.setState(leader.getX(), leader.getY(), leaderFixedTheta);
+            return;
+        }
+
+        if (config.getScenario() == SimulationScenario.CIRCULAR_LEADER) {
+            leaderCircularPhase = random.nextDouble() * 2.0 * Math.PI;
+            double x = wrapPosition(
+                    SimulationConfig.CIRCULAR_LEADER_CENTER_X
+                            + SimulationConfig.CIRCULAR_LEADER_RADIUS * Math.cos(leaderCircularPhase));
+            double y = wrapPosition(
+                    SimulationConfig.CIRCULAR_LEADER_CENTER_Y
+                            + SimulationConfig.CIRCULAR_LEADER_RADIUS * Math.sin(leaderCircularPhase));
+            double theta = normalizeAngle(leaderCircularPhase + Math.PI / 2.0);
+            leader.setState(x, y, theta);
+        }
     }
 
     private List<Particle> initializeParticles() {
@@ -36,6 +92,34 @@ public class VicsekSimulation {
 
         for (int i = 0; i < n; i++) {
             Particle pi = particles.get(i);
+
+            if (i == leaderId && config.getScenario() == SimulationScenario.FIXED_LEADER) {
+                double theta = leaderFixedTheta;
+                double x = wrapPosition(pi.getX() + SimulationConfig.V0 * Math.cos(theta) * SimulationConfig.DT);
+                double y = wrapPosition(pi.getY() + SimulationConfig.V0 * Math.sin(theta) * SimulationConfig.DT);
+
+                nextTheta[i] = theta;
+                nextX[i] = x;
+                nextY[i] = y;
+                continue;
+            }
+
+            if (i == leaderId && config.getScenario() == SimulationScenario.CIRCULAR_LEADER) {
+                leaderCircularPhase = normalizeAngle(leaderCircularPhase + SimulationConfig.CIRCULAR_LEADER_OMEGA * SimulationConfig.DT);
+                double x = wrapPosition(
+                        SimulationConfig.CIRCULAR_LEADER_CENTER_X
+                                + SimulationConfig.CIRCULAR_LEADER_RADIUS * Math.cos(leaderCircularPhase));
+                double y = wrapPosition(
+                        SimulationConfig.CIRCULAR_LEADER_CENTER_Y
+                                + SimulationConfig.CIRCULAR_LEADER_RADIUS * Math.sin(leaderCircularPhase));
+                double theta = normalizeAngle(leaderCircularPhase + Math.PI / 2.0);
+
+                nextTheta[i] = theta;
+                nextX[i] = x;
+                nextY[i] = y;
+                continue;
+            }
+
             double avgTheta = computeLocalAverageAngle(pi);
             double noise = (random.nextDouble() - 0.5) * config.getEta();
             double theta = normalizeAngle(avgTheta + noise);
