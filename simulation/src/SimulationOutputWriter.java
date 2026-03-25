@@ -38,9 +38,9 @@ public class SimulationOutputWriter {
             writer.newLine();
             writer.write("L=" + SimulationConfig.L);
             writer.newLine();
-            writer.write("density=" + SimulationConfig.DENSITY);
+            writer.write("density=" + config.getDensity());
             writer.newLine();
-            writer.write("N=" + SimulationConfig.N);
+            writer.write("N=" + config.getN());
             writer.newLine();
             writer.write("v0=" + SimulationConfig.V0);
             writer.newLine();

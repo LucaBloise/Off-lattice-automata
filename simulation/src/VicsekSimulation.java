@@ -14,7 +14,7 @@ public class VicsekSimulation {
     public VicsekSimulation(SimulationConfig config) {
         this.config = config;
         this.random = new Random(config.getSeed());
-        this.particles = initializeParticles();
+        this.particles = initializeParticles(config);
         this.leaderId = config.getScenario().hasLeader() ? SimulationConfig.LEADER_ID : -1;
 
         initializeLeaderIfNeeded();
@@ -73,9 +73,9 @@ public class VicsekSimulation {
         }
     }
 
-    private List<Particle> initializeParticles() {
-        List<Particle> initialParticles = new ArrayList<>(SimulationConfig.N);
-        for (int i = 0; i < SimulationConfig.N; i++) {
+    private List<Particle> initializeParticles(SimulationConfig config) {
+        List<Particle> initialParticles = new ArrayList<>(config.getN());
+        for (int i = 0; i < config.getN(); i++) {
             double x = random.nextDouble() * SimulationConfig.L;
             double y = random.nextDouble() * SimulationConfig.L;
             double theta = random.nextDouble() * 2.0 * Math.PI;
