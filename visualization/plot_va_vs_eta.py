@@ -376,20 +376,15 @@ def main() -> None:
         capsize=3,
         markersize=5,
         linewidth=1.6,
-        label="mean Va (error bars = std)",
     )
 
-    for x, y, n in zip(eta, va_mean, n_runs):
-        ax.annotate(f"n={n}", (x, y), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=8)
-
-    ax.set_xlabel("eta")
-    ax.set_ylabel("Va (stationary mean)")
+    ax.set_xlabel(r"amplitud de ruido ($\eta$)", fontsize=20)
+    ax.set_ylabel(r"polarizacion ($v_{a}$)", fontsize=20)
     ax.set_title(
         f"Input vs Observable: Va(eta), scenario={scenario_filter}, transient cutoff t >= {args.transient_step}"
     )
     ax.set_ylim(0.0, 1.02)
     ax.grid(alpha=0.25)
-    ax.legend(loc="best", fontsize=9)
     fig.tight_layout()
 
     if args.csv is not None:
