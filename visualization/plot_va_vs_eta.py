@@ -2,13 +2,9 @@
 """
 Build Input vs Observable curve: Va as a function of eta, with error bars.
 
-It reads simulation run folders, computes for each run:
-- Va(t) from trajectory.txt
-- scalar Va_run = mean_t>=t0 Va(t), where t0 is transient cutoff
-
-Then groups runs by eta and computes:
-- mean Va across runs
-- std Va across runs (error bars)
+For each eta, it uses one run and computes from Va(t):
+- observable = mean Va(t) for t in [transient_step, stationary_end]
+- error bar = std Va(t) over the same time window
 
 Expected files per run directory:
 - trajectory.txt   columns: t id x y vx vy theta
@@ -51,8 +47,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--transient-step",
         type=int,
-        default=200,
+        default=300,
         help="Discard all timesteps t < transient-step when averaging Va(t).",
+    )
+    parser.add_argument(
+        "--stationary-end",
+        type=int,
+        default=1000,
+        help="Last timestep (inclusive) to include in the stationary average. Default: 1000.",
     )
     parser.add_argument(
         "--scenario",
@@ -255,7 +257,7 @@ def eta_allowed(eta: float, eta_list: List[float] | None, tol: float) -> bool:
     return any(abs(eta - target) <= tol for target in eta_list)
 
 
-def run_scalar_va(run_dir: Path, transient_step: int) -> Tuple[float, float, int, str]:
+def run_scalar_va(run_dir: Path, transient_step: int, stationary_end: int) -> Tuple[float, float, float, str]:
     properties = parse_properties(run_dir / "properties.txt")
     eta = as_float(properties, "eta", math.nan)
     if math.isnan(eta):
@@ -266,28 +268,37 @@ def run_scalar_va(run_dir: Path, transient_step: int) -> Tuple[float, float, int
     va_t = compute_va_t(data, properties)
 
     t0 = max(int(transient_step), 0)
+    t1 = int(stationary_end) + 1  # inclusive upper bound
     if t0 >= len(va_t):
         raise ValueError(
             f"transient-step={t0} is >= number of timesteps={len(va_t)} for run: {run_dir.name}"
         )
 
-    va_scalar = float(np.mean(va_t[t0:]))
-    return eta, va_scalar, len(va_t), scenario
+    segment = va_t[t0:t1]
+    if len(segment) == 0:
+        raise ValueError(
+            f"No samples in averaging window [{transient_step}, {stationary_end}] for run: {run_dir.name}"
+        )
+
+    va_mean = float(np.mean(segment))
+    va_std = float(np.std(segment, ddof=1)) if len(segment) > 1 else 0.0
+    return eta, va_mean, va_std, scenario
 
 
 def aggregate_by_eta(
     runs: List[Path],
     transient_step: int,
+    stationary_end: int,
     eta_list: List[float] | None,
     eta_tol: float,
     min_runs_per_eta: int,
     scenario_filter: str,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Dict[float, List[Tuple[str, float]]]]:
-    grouped: Dict[float, List[Tuple[str, float]]] = defaultdict(list)
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Dict[float, List[Tuple[str, float, float]]]]:
+    grouped: Dict[float, List[Tuple[str, float, float]]] = defaultdict(list)
 
     for run in runs:
         try:
-            eta, va_scalar, _, run_scenario = run_scalar_va(run, transient_step)
+            eta, va_mean, va_std, run_scenario = run_scalar_va(run, transient_step, stationary_end)
         except Exception as exc:
             print(f"[warn] Skipping {run.name}: {exc}")
             continue
@@ -298,7 +309,11 @@ def aggregate_by_eta(
         if not eta_allowed(eta, eta_list, eta_tol):
             continue
 
-        grouped[eta].append((run.name, va_scalar))
+        # One repetition per eta: keep only the first valid run for each eta.
+        if grouped[eta]:
+            print(f"[warn] eta={eta:g} already has a selected run; skipping extra run {run.name}")
+            continue
+        grouped[eta].append((run.name, va_mean, va_std))
 
     etas_sorted = sorted(grouped.keys())
 
@@ -308,17 +323,18 @@ def aggregate_by_eta(
     n_out: List[int] = []
 
     for eta in etas_sorted:
-        values = np.array([v for _, v in grouped[eta]], dtype=np.float64)
-        if len(values) < min_runs_per_eta:
+        runs_for_eta = grouped[eta]
+        if len(runs_for_eta) < min_runs_per_eta:
             print(
-                f"[warn] eta={eta:g} has {len(values)} runs (< min-runs-per-eta={min_runs_per_eta}), excluded"
+                f"[warn] eta={eta:g} has {len(runs_for_eta)} runs (< min-runs-per-eta={min_runs_per_eta}), excluded"
             )
             continue
 
+        _, va_mean, va_std = runs_for_eta[0]
         eta_out.append(eta)
-        mean_out.append(float(np.mean(values)))
-        std_out.append(float(np.std(values, ddof=1)) if len(values) > 1 else 0.0)
-        n_out.append(int(len(values)))
+        mean_out.append(va_mean)
+        std_out.append(va_std)
+        n_out.append(1)
 
     return (
         np.array(eta_out, dtype=np.float64),
@@ -344,6 +360,8 @@ def main() -> None:
 
     if args.transient_step < 0:
         raise ValueError("--transient-step must be >= 0")
+    if args.stationary_end <= args.transient_step:
+        raise ValueError("--stationary-end must be > --transient-step")
     if args.min_runs_per_eta <= 0:
         raise ValueError("--min-runs-per-eta must be >= 1")
     if args.eta_tol < 0:
@@ -355,6 +373,7 @@ def main() -> None:
     eta, va_mean, va_std, n_runs, grouped = aggregate_by_eta(
         runs=runs,
         transient_step=args.transient_step,
+        stationary_end=args.stationary_end,
         eta_list=args.eta_list,
         eta_tol=args.eta_tol,
         min_runs_per_eta=args.min_runs_per_eta,
@@ -381,7 +400,7 @@ def main() -> None:
     ax.set_xlabel(r"amplitud de ruido ($\eta$)", fontsize=20)
     ax.set_ylabel(r"polarizacion ($v_{a}$)", fontsize=20)
     ax.set_title(
-        f"Input vs Observable: Va(eta), scenario={scenario_filter}, transient cutoff t >= {args.transient_step}"
+        f"Input vs Observable: Va(eta), scenario={scenario_filter}, avg t=[{args.transient_step}, {args.stationary_end}]"
     )
     ax.set_ylim(0.0, 1.02)
     ax.grid(alpha=0.25)

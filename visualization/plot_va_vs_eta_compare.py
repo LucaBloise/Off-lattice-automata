@@ -55,6 +55,12 @@ def parse_args() -> argparse.Namespace:
         help="Discard all timesteps t < transient-step when averaging Va(t).",
     )
     parser.add_argument(
+        "--stationary-end",
+        type=int,
+        default=1000,
+        help="Last timestep (inclusive) to include in the stationary average. Default: 1000.",
+    )
+    parser.add_argument(
         "--min-runs-per-eta",
         type=int,
         default=1,
@@ -93,6 +99,8 @@ def main() -> None:
 
     if args.transient_step < 0:
         raise ValueError("--transient-step must be >= 0")
+    if args.stationary_end <= args.transient_step:
+        raise ValueError("--stationary-end must be > --transient-step")
     if args.min_runs_per_eta <= 0:
         raise ValueError("--min-runs-per-eta must be >= 1")
 
@@ -105,6 +113,7 @@ def main() -> None:
         eta, va_mean, va_std, n_runs, grouped = aggregate_by_eta(
             runs=runs,
             transient_step=args.transient_step,
+            stationary_end=args.stationary_end,
             eta_list=args.eta_list,
             eta_tol=args.eta_tol,
             min_runs_per_eta=args.min_runs_per_eta,
