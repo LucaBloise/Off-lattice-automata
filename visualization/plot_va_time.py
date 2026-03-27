@@ -266,11 +266,12 @@ def main() -> None:
             stay_steps=args.stay_steps,
         )
 
-        ax.plot(t_axis, va, color="#1f77b4", linewidth=1.6, alpha=0.95, label="Va(t)")
+        ax.plot(t_axis, va, color="#1f77b4", linewidth=1.6, alpha=0.95)
 
-        if t_stationary is not None:
-            ax.axvline(t_stationary, color="#d62728", linestyle="--", linewidth=1.5, label=f"stationary start ~ {t_stationary}")
-            ax.axvspan(t_stationary, t_axis[-1], color="#d62728", alpha=0.08)
+        stationary_start = 200
+        if t_axis[-1] >= stationary_start:
+            ax.axvline(stationary_start, color="#d62728", linestyle="--", linewidth=1.5)
+            ax.axvspan(stationary_start, t_axis[-1], color="#d62728", alpha=0.08)
 
         eta = props.get("eta", "?")
         rho = props.get("density", "?")
@@ -279,11 +280,10 @@ def main() -> None:
         run_name = run_dir.name
 
         ax.set_title(f"{run_name} | scenario={scenario}, eta={eta}, density={rho}, N={n_particles}")
-        ax.set_xlabel("time step t")
-        ax.set_ylabel("Va")
+        ax.set_xlabel(r"tiempo de simulacion ($t$)", fontsize=20)
+        ax.set_ylabel(r"polarizacion ($v_{a}$)", fontsize=20, labelpad=14)
         ax.set_ylim(0.0, 1.02)
         ax.grid(alpha=0.25)
-        ax.legend(loc="best", fontsize=8)
 
     fig.suptitle("Temporal Evolution of Polarization Va(t)", fontsize=13)
     fig.tight_layout(rect=[0.0, 0.0, 1.0, 0.98])

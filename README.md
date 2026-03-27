@@ -22,12 +22,25 @@ From this simulation folder:
 javac -d bin src/*.java
 
 ## Run
-java -cp bin Main <eta> [steps] [seed]
+java -cp bin Main <eta> [scenario] [steps] [seed] [density]
 
 Examples:
 - java -cp bin Main 0.3
 - java -cp bin Main 1.0 3000
 - java -cp bin Main 0.8 5000 12345
+- java -cp bin Main 0.7 fixed_leader
+- java -cp bin Main 0.7 circular_leader 5000 12345
+- java -cp bin Main 0.5 fixed_leader 1000 12345 4.0
+
+Batch run:
+
+java -cp bin BatchMain [scenario] [etas_csv] [repetitions] [steps] [seed_base] [density]
+
+Examples:
+- java -cp bin BatchMain
+- java -cp bin BatchMain fixed_leader
+- java -cp bin BatchMain circular_leader 0,0.1,1,2,3,4,5 10 1000 1000
+- java -cp bin BatchMain circular_leader 0,0.1,1,2,3,4,5 10 1000 1000 4.0
 
 ## Output structure
 Each run creates:
