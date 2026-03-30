@@ -397,8 +397,8 @@ def main() -> None:
         linewidth=1.6,
     )
 
-    ax.set_xlabel(r"amplitud de ruido ($\eta$)", fontsize=20)
-    ax.set_ylabel(r"polarizacion ($v_{a}$)", fontsize=20)
+    ax.set_xlabel(r"Amplitud de ruido ($\eta$)", fontsize=20)
+    ax.set_ylabel(r"Polarización ($V_a$)", fontsize=20)
     ax.set_title(
         f"Input vs Observable: Va(eta), scenario={scenario_filter}, avg t=[{args.transient_step}, {args.stationary_end}]"
     )

@@ -43,6 +43,12 @@ def parse_args() -> argparse.Namespace:
         help="If > 0, cap number of plotted runs after selection.",
     )
     parser.add_argument(
+        "--vline-t",
+        type=int,
+        default=300,
+        help="Timestep where the vertical reference line is drawn.",
+    )
+    parser.add_argument(
         "--save",
         type=Path,
         default=None,
@@ -169,6 +175,8 @@ def main() -> None:
         raise ValueError("--latest-count must be >= 0")
     if args.max_runs < 0:
         raise ValueError("--max-runs must be >= 0")
+    if args.vline_t < 0:
+        raise ValueError("--vline-t must be >= 0")
 
     run_dirs = discover_runs(args.outputs_dir.resolve())
     run_dirs = select_runs(run_dirs, args.latest_count, args.max_runs)
@@ -185,10 +193,11 @@ def main() -> None:
 
         ax.plot(t_axis, va, linewidth=1.4, alpha=0.9, label=run_label(run_dir, props))
 
-    ax.set_xlabel(r"Tiempo de simulación ($t$)")
-    ax.set_ylabel(r"Polarización ($V_a$)")
+    ax.set_xlabel(r"Tiempo de simulación ($t$)", fontsize=20)
+    ax.set_ylabel(r"Polarización ($V_a$)", fontsize=20)
     ax.set_ylim(0.0, 1.02)
-    ax.axvline(300, color="#d62728", linestyle="--", linewidth=1.5, alpha=0.7)
+    ax.axvline(args.vline_t, color="#d62728", linestyle="--", linewidth=1.5, alpha=0.7)
+    ax.tick_params(axis="both", which="major", labelsize=20)
     ax.grid(alpha=0.25)
 
     # Put legend above the axes in horizontal layout to avoid covering curves.
@@ -197,7 +206,7 @@ def main() -> None:
         loc="lower center",
         bbox_to_anchor=(0.5, 1.02),
         ncol=ncol,
-        fontsize=8,
+        fontsize=20,
         frameon=False,
         handlelength=1.8,
         columnspacing=1.0,

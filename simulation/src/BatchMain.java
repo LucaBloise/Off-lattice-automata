@@ -21,8 +21,8 @@ public class BatchMain {
     }
 
     private static BatchParams parseArguments(String[] args) {
-        if (args.length > 5) {
-            throw new IllegalArgumentException("Expected up to 5 arguments");
+        if (args.length > 6) {
+            throw new IllegalArgumentException("Expected up to 6 arguments");
         }
 
         SimulationScenario scenario = DEFAULT_SCENARIO;

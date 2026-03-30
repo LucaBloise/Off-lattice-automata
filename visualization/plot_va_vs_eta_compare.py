@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """
-Compare Va(eta) curves for the three scenarios in one figure:
+Compare Va(eta) and its error for the three scenarios in separated plots:
 - standard
 - fixed_leader
 - circular_leader
 
-Uses the same aggregation criterion as plot_va_vs_eta.py:
-1) per run: Va_run = mean_t>=transient_step Va(t)
-2) per eta and scenario: mean/std across runs
+Uses the same aggregation criterion as plot_va_vs_eta.py.
 """
 
 from __future__ import annotations
@@ -27,9 +25,9 @@ COLORS = {
     "circular_leader": "#2ca02c",
 }
 LABELS = {
-    "standard": "Standard (no leader)",
-    "fixed_leader": "Fixed-direction leader",
-    "circular_leader": "Circular leader",
+    "standard": "Estándar (sin líder)",
+    "fixed_leader": "Líder con dirección fija",
+    "circular_leader": "Líder circular",
 }
 
 
@@ -106,11 +104,12 @@ def main() -> None:
 
     runs = resolve_runs(args)
 
-    fig, ax = plt.subplots(figsize=(8.8, 5.2))
+    fig_va, ax_va = plt.subplots(figsize=(8.8, 5.2))
+    fig_err, ax_err = plt.subplots(figsize=(8.8, 5.2))
 
     plotted_any = False
     for scenario in SCENARIOS:
-        eta, va_mean, va_std, n_runs, grouped = aggregate_by_eta(
+        eta, va_mean, va_std, _n_runs, grouped = aggregate_by_eta(
             runs=runs,
             transient_step=args.transient_step,
             stationary_end=args.stationary_end,
@@ -125,21 +124,25 @@ def main() -> None:
             continue
 
         plotted_any = True
-        ax.errorbar(
+        ax_va.plot(
             eta,
             va_mean,
-            yerr=va_std,
-            fmt="o-",
+            "o-",
             color=COLORS[scenario],
-            ecolor=COLORS[scenario],
-            capsize=3,
             markersize=5,
             linewidth=1.6,
             label=LABELS[scenario],
         )
 
-        for x, y, n in zip(eta, va_mean, n_runs):
-            ax.annotate(f"n={n}", (x, y), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7)
+        ax_err.plot(
+            eta,
+            va_std,
+            "o-",
+            color=COLORS[scenario],
+            markersize=5,
+            linewidth=1.6,
+            label=LABELS[scenario],
+        )
 
         print(f"Included points for scenario={scenario}:")
         for eta_value in sorted(grouped.keys()):
@@ -148,18 +151,42 @@ def main() -> None:
     if not plotted_any:
         raise ValueError("No points to plot. Check runs/scenario coverage and filters.")
 
-    ax.set_xlabel("eta")
-    ax.set_ylabel("Va (stationary mean)")
-    ax.set_title(f"Va vs eta comparison across scenarios (t >= {args.transient_step})")
-    ax.set_ylim(0.0, 1.02)
-    ax.grid(alpha=0.25)
-    ax.legend(loc="best", fontsize=9)
-    fig.tight_layout()
+    ax_va.set_xlabel(r"Amplitud de ruido ($\eta$)", fontsize=20)
+    ax_va.set_ylabel(r"Polarización ($V_a$)", fontsize=20)
+    ax_va.set_ylim(0.0, 1.02)
+    ax_va.grid(alpha=0.25)
+    ax_va.legend(
+        loc="lower center",
+        bbox_to_anchor=(0.5, 1.02),
+        ncol=3,
+        fontsize=16,
+        frameon=False,
+    )
+    ax_va.tick_params(axis="both", which="major", labelsize=16)
+    fig_va.tight_layout(rect=[0.0, 0.0, 1.0, 0.9])
+
+    ax_err.set_xlabel(r"Amplitud de ruido ($\eta$)", fontsize=20)
+    ax_err.set_ylabel(r"Desvío estándar ($\sigma_{V_a}$)", fontsize=20)
+    ax_err.grid(alpha=0.25)
+    ax_err.legend(
+        loc="lower center",
+        bbox_to_anchor=(0.5, 1.02),
+        ncol=3,
+        fontsize=16,
+        frameon=False,
+    )
+    ax_err.tick_params(axis="both", which="major", labelsize=16)
+    fig_err.tight_layout(rect=[0.0, 0.0, 1.0, 0.9])
 
     if args.save is not None:
+        save_va = args.save.parent / f"{args.save.stem}_va{args.save.suffix}"
+        save_err = args.save.parent / f"{args.save.stem}_err{args.save.suffix}"
         args.save.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(args.save, dpi=args.dpi)
-        print(f"Saved figure: {args.save.resolve()}")
+        fig_va.savefig(save_va, dpi=args.dpi)
+        fig_err.savefig(save_err, dpi=args.dpi)
+        print(f"Saved figures:")
+        print(f"  Va:    {save_va.resolve()}")
+        print(f"  Error: {save_err.resolve()}")
     else:
         plt.show()
 

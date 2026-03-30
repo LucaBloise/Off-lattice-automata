@@ -15,13 +15,26 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import importlib
 import math
 from pathlib import Path
+import tempfile
 from typing import Dict, Tuple
 
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
+from matplotlib.animation import FFMpegWriter, FuncAnimation
+from matplotlib.widgets import Button, Slider
 import numpy as np
+
+
+def _escape_latex(text: str) -> str:
+    """Escape special LaTeX characters in text for mathtext."""
+    replacements = {'\\': r'\textbackslash ', '$': r'\$', '%': r'\%', '#': r'\#',
+                    '&': r'\&', '_': r'\_', '{': r'\{', '}': r'\}'}
+    result = text
+    for char, escaped in replacements.items():
+        result = result.replace(char, escaped)
+    return result
 
 
 def parse_args() -> argparse.Namespace:
@@ -212,6 +225,86 @@ def as_bool(properties: Dict[str, str], key: str, fallback: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "y"}
 
 
+def compute_va_per_step(data: np.ndarray, props: Dict[str, str], n_steps: int) -> np.ndarray:
+    t = data[:, 0].astype(np.int64)
+    vx = data[:, 4]
+    vy = data[:, 5]
+
+    n_by_t = np.bincount(t, minlength=n_steps)
+    sum_vx = np.bincount(t, weights=vx, minlength=n_steps)
+    sum_vy = np.bincount(t, weights=vy, minlength=n_steps)
+
+    n_from_props = as_int(props, "N", 0)
+    n_particles = n_from_props if n_from_props > 0 else int(np.max(n_by_t))
+
+    v0_from_props = as_float(props, "v0", -1.0)
+    if v0_from_props > 0:
+        denom = n_particles * v0_from_props
+        return np.sqrt(sum_vx * sum_vx + sum_vy * sum_vy) / denom
+
+    speed = np.sqrt(vx * vx + vy * vy)
+    sum_speed = np.bincount(t, weights=speed, minlength=n_steps)
+    denom = np.where(sum_speed > 0.0, sum_speed, 1.0)
+    return np.sqrt(sum_vx * sum_vx + sum_vy * sum_vy) / denom
+
+
+def convert_gif_to_mp4(gif_path: Path, mp4_path: Path, fps: int) -> bool:
+    try:
+        imageio = importlib.import_module("imageio.v2")
+    except Exception:
+        return False
+
+
+def save_mp4_with_opencv(fig, update_fn, n_frames: int, output_path: Path, fps: int) -> bool:
+    try:
+        cv2 = importlib.import_module("cv2")
+    except Exception:
+        return False
+
+    writer = None
+    try:
+        update_fn(0)
+        fig.canvas.draw()
+        first = np.asarray(fig.canvas.buffer_rgba())
+        height, width = first.shape[0], first.shape[1]
+
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(str(output_path), fourcc, float(fps), (width, height))
+        if not writer.isOpened():
+            return False
+
+        for frame_idx in range(n_frames):
+            update_fn(frame_idx)
+            fig.canvas.draw()
+            rgba = np.asarray(fig.canvas.buffer_rgba())
+            bgr = cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGR)
+            writer.write(bgr)
+
+        writer.release()
+        return True
+    except Exception:
+        if writer is not None:
+            writer.release()
+        return False
+
+    try:
+        reader = imageio.get_reader(str(gif_path))
+        writer = imageio.get_writer(
+            str(mp4_path),
+            format="FFMPEG",
+            fps=fps,
+            codec="libx264",
+            pixelformat="yuv420p",
+        )
+        for frame in reader:
+            writer.append_data(frame)
+        writer.close()
+        reader.close()
+        return True
+    except Exception:
+        return False
+
+
 def main() -> None:
     args = parse_args()
 
@@ -244,6 +337,8 @@ def main() -> None:
     leader_id = as_int(properties, "leader_id", -1)
     valid_leader = has_leader and 0 <= leader_id < n_particles
 
+    va_per_step = compute_va_per_step(trajectory_data, properties, n_steps)
+
     follower_indices = np.arange(n_particles)
     if valid_leader:
         follower_indices = np.array([idx for idx in range(n_particles) if idx != leader_id], dtype=np.int64)
@@ -252,9 +347,19 @@ def main() -> None:
     ax.set_xlim(0.0, L)
     ax.set_ylim(0.0, L)
     ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.set_title("Vicsek Off-lattice Animation")
+    ax.set_xlabel("x", fontsize=20)
+    ax.set_ylabel("y", fontsize=20)
+    ax.tick_params(axis="both", which="major", labelsize=16)
+    
+    # Build title with escaped parameters
+    scenario_safe = _escape_latex(scenario)
+    density_safe = _escape_latex(density)
+    eta_safe = _escape_latex(eta)
+    title_text = (
+        f"$\\mathrm{{Condiciones}}={scenario_safe}$\n"
+        f"$\\rho={density_safe}$, $\\eta={eta_safe}$"
+    )
+    ax.set_title(title_text, pad=18, fontsize=18)
 
     initial_step = int(frame_indices[0])
     quiver = ax.quiver(
@@ -300,31 +405,19 @@ def main() -> None:
             edgecolors="#111111",
             linewidths=1.2,
             zorder=6,
-            label="leader",
+            label="Líder",
         )
-        ax.legend(loc="lower right", fontsize=8)
+        ax.legend(
+            loc="upper left",
+            bbox_to_anchor=(1.12, 1.0),
+            ncol=1,
+            fontsize=14,
+            frameon=True,
+        )
 
     colorbar = fig.colorbar(quiver, ax=ax, pad=0.02)
-    colorbar.set_label("velocity angle (rad)")
-
-    info_lines = [
-        f"run: {run_dir.name}",
-        f"scenario={scenario}",
-        f"N={n_particles}  L={L:g}  density={density}",
-        f"eta={eta}  v0={v0}  dt={dt}  r={radius}",
-    ]
-    if valid_leader:
-        info_lines.append(f"leader_id={leader_id}")
-    info_text = ax.text(
-        0.02,
-        0.98,
-        "\n".join(info_lines),
-        transform=ax.transAxes,
-        va="top",
-        ha="left",
-        fontsize=9,
-        bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.8, "edgecolor": "gray"},
-    )
+    colorbar.set_label("ángulo de velocidad (rad)", fontsize=16)
+    colorbar.ax.tick_params(labelsize=14)
 
     step_text = ax.text(
         0.98,
@@ -333,7 +426,7 @@ def main() -> None:
         transform=ax.transAxes,
         va="top",
         ha="right",
-        fontsize=10,
+        fontsize=16,
         bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.8, "edgecolor": "gray"},
     )
 
@@ -346,7 +439,7 @@ def main() -> None:
             vy[step, follower_indices] * args.vector_length_scale,
             theta[step, follower_indices],
         )
-        artists = [quiver, step_text, info_text]
+        artists = [quiver, step_text]
 
         if valid_leader and leader_quiver is not None and leader_marker is not None:
             leader_offsets = np.array([[x[step, leader_id], y[step, leader_id]]])
@@ -358,28 +451,127 @@ def main() -> None:
             leader_marker.set_offsets(leader_offsets)
             artists.extend([leader_quiver, leader_marker])
 
-        step_text.set_text(f"step={step} / {n_steps - 1}")
+        step_text.set_text(f"$t={step}$ / {n_steps - 1}\n$va={va_per_step[step]:.4f}$")
         return tuple(artists)
+
+    n_frames = len(frame_indices)
+
+    # Save mode: plain FuncAnimation, no interactive widgets.
+    if args.save is not None:
+        animation = FuncAnimation(
+            fig,
+            update,
+            frames=n_frames,
+            interval=args.interval,
+            blit=False,
+            repeat=False,
+        )
+        args.save.parent.mkdir(parents=True, exist_ok=True)
+        suffix = args.save.suffix.lower()
+        print(f"Guardando animación a {args.save.resolve()}...")
+        if suffix == ".gif":
+            animation.save(args.save, writer="pillow", fps=args.fps, dpi=args.dpi)
+        elif suffix in {".mp4", ".mkv", ".avi", ".mov"}:
+            saved_video = False
+            if FFMpegWriter.isAvailable():
+                try:
+                    animation.save(args.save, writer="ffmpeg", fps=args.fps, dpi=args.dpi)
+                    saved_video = True
+                except Exception:
+                    print("ffmpeg falló al codificar, probando alternativa OpenCV...")
+            if not saved_video and suffix == ".mp4":
+                if save_mp4_with_opencv(fig, update, n_frames, args.save, args.fps):
+                    print("MP4 guardado usando alternativa OpenCV")
+                    saved_video = True
+                else:
+                    print("OpenCV fallback unavailable, trying imageio-ffmpeg fallback for MP4...")
+
+            if not saved_video and suffix == ".mp4":
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    tmp_gif = Path(tmp_dir) / "tmp_animation.gif"
+                    animation.save(tmp_gif, writer="pillow", fps=args.fps, dpi=args.dpi)
+                    if convert_gif_to_mp4(tmp_gif, args.save, args.fps):
+                        print("Saved MP4 using imageio-ffmpeg fallback")
+                        saved_video = True
+                    else:
+                        print("imageio-ffmpeg fallback unavailable, falling back to GIF")
+                        gif_path = args.save.with_suffix(".gif")
+                        animation.save(gif_path, writer="pillow", fps=args.fps, dpi=args.dpi)
+                        print(f"Saved as GIF instead: {gif_path.resolve()}")
+                        return
+            if not saved_video:
+                animation.save(args.save, fps=args.fps, dpi=args.dpi)
+        else:
+            animation.save(args.save, fps=args.fps, dpi=args.dpi)
+        print(f"Guardado: {args.save.resolve()}")
+        return
+
+    # Interactive mode: slider + play/pause button + keyboard controls.
+    fig.subplots_adjust(bottom=0.18)
+
+    state = {"frame": 0, "paused": False}
+
+    # Create controls before first render so callbacks can safely reference widgets.
+    ax_slider = fig.add_axes([0.12, 0.07, 0.68, 0.03])
+    frame_slider = Slider(ax_slider, "Frame", 0, n_frames - 1, valinit=0, valstep=1)
+    ax_btn = fig.add_axes([0.83, 0.055, 0.10, 0.055])
+    btn_playpause = Button(ax_btn, "Pause")
+
+    def render_frame(frame_number: int) -> None:
+        frame_number = max(0, min(int(frame_number), n_frames - 1))
+        state["frame"] = frame_number
+        update(frame_number)
+        frame_slider.eventson = False
+        frame_slider.set_val(frame_number)
+        frame_slider.eventson = True
+        fig.canvas.draw_idle()
+
+    def frame_gen():
+        while True:
+            yield state["frame"]
+            if not state["paused"]:
+                state["frame"] = (state["frame"] + 1) % n_frames
+
+    def anim_update(frame_number: int):
+        render_frame(frame_number)
+        return []
 
     animation = FuncAnimation(
         fig,
-        update,
-        frames=len(frame_indices),
+        anim_update,
+        frames=frame_gen(),
         interval=args.interval,
         blit=False,
-        repeat=True,
+        cache_frame_data=False,
     )
 
-    if args.save is not None:
-        args.save.parent.mkdir(parents=True, exist_ok=True)
-        suffix = args.save.suffix.lower()
-        if suffix == ".gif":
-            animation.save(args.save, writer="pillow", fps=args.fps, dpi=args.dpi)
-        else:
-            animation.save(args.save, fps=args.fps, dpi=args.dpi)
-        print(f"Saved animation: {args.save.resolve()}")
-    else:
-        plt.show()
+    def toggle_pause() -> None:
+        state["paused"] = not state["paused"]
+        btn_playpause.label.set_text("Play" if state["paused"] else "Pause")
+        fig.canvas.draw_idle()
+
+    def on_slider_change(val: float) -> None:
+        render_frame(int(val))
+
+    frame_slider.on_changed(on_slider_change)
+    btn_playpause.on_clicked(lambda _event: toggle_pause())
+
+    def on_key(event) -> None:
+        if event.key == " ":
+            toggle_pause()
+        elif event.key == "left":
+            state["paused"] = True
+            btn_playpause.label.set_text("Play")
+            render_frame(state["frame"] - 1)
+        elif event.key == "right":
+            state["paused"] = True
+            btn_playpause.label.set_text("Play")
+            render_frame(state["frame"] + 1)
+
+    fig.canvas.mpl_connect("key_press_event", on_key)
+
+    print("Controles: ESPACIO/botón pausa-reproducción | IZQUIERDA/DERECHA paso | barra desplazamiento")
+    plt.show()
 
 
 if __name__ == "__main__":
